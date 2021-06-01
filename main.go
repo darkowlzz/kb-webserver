@@ -9,10 +9,14 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"github.com/darkowlzz/operator-toolkit/webhook/cert"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	//+kubebuilder:scaffold:imports
@@ -56,6 +60,27 @@ func main() {
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
+		os.Exit(1)
+	}
+
+	// Create an uncached client to be used to be used by the certificate
+	// manager. Cached client isn't ready for use at this stage.
+	cli, err := client.New(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		setupLog.Error(err, "failed to create raw client")
+		os.Exit(1)
+	}
+	// Configure the certificate manager.
+	certOpts := cert.Options{
+		Service: &admissionregistrationv1.ServiceReference{
+			Name:      "webhook-service",
+			Namespace: "default",
+		},
+		Client:    cli,
+		SecretRef: &types.NamespacedName{Name: "webhook-secret", Namespace: "default"},
+	}
+	if err := cert.NewManager(nil, certOpts); err != nil {
+		setupLog.Error(err, "unable to provision certificate")
 		os.Exit(1)
 	}
 
